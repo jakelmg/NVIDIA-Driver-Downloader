@@ -45,25 +45,30 @@ function UpdateNVIDIADriver {
             [xml]$LookupData = Invoke-WebRequest -Uri $LookupURL -UseBasicParsing
 
             # Parse GPU list
-            $gpuList = $LookupData.LookupValueSearch.LookupValues.LookupValue | Select-Object -ExpandProperty Name
+            $gpuList = $LookupData.LookupValueSearch.LookupValues.LookupValue | Select-Object -ExpandProperty Name | Sort-Object -Unique
+            Write-Log "Presenting user with a deduplicated list of NVIDIA GPUs..."
 
-            if ($gpuList.Count -eq 0) {
-                Write-Log "Failed to fetch GPU list from NVIDIA API. Exiting."
-                return $null
-            }
-
-            # Prompt user for selection
-            Write-Log "Presenting user with a list of NVIDIA GPUs to select..."
+            # User selects GPU
             $SelectedGpu = $gpuList | Out-GridView -Title "Select your NVIDIA GPU" -PassThru
 
             if ($SelectedGpu) {
                 Write-Log "User selected GPU: $SelectedGpu"
-                # Fetch the corresponding PSID and PFID
-                $SelectedGpuInfo = $LookupData.LookupValueSearch.LookupValues.LookupValue | Where-Object { $_.Name -eq $SelectedGpu }
-                return @{
-                    Name = $SelectedGpu
-                    ParentID = $SelectedGpuInfo.ParentID
-                    Value = $SelectedGpuInfo.Value
+
+                # Fetch the first matching GPU entry
+                $SelectedGpuInfo = $LookupData.LookupValueSearch.LookupValues.LookupValue | Where-Object {
+                    $_.Name -eq $SelectedGpu
+                } | Select-Object -First 1
+
+                if ($SelectedGpuInfo) {
+                    Write-Log "First match for manual selection: $($SelectedGpuInfo.Name)"
+                    return @{
+                        Name = $SelectedGpuInfo.Name
+                        ParentID = $SelectedGpuInfo.ParentID
+                        Value = $SelectedGpuInfo.Value
+                    }
+                } else {
+                    Write-Log "No match found for user-selected GPU: $SelectedGpu. Exiting."
+                    return $null
                 }
             } else {
                 Write-Log "User canceled GPU selection. Exiting."
@@ -112,14 +117,29 @@ function UpdateNVIDIADriver {
 		        $CurrentVersion = $nvidiaSmiOutput.Trim()
 		    }
 		} else {
-		    [System.Version]$ver = $CurrentDriver.DriverVersion
-		    $CurrentVersion = ("{0}{1}" -f $ver.Build, $ver.Revision).Substring(1).Insert(3,'.')
+		    if ($CurrentDriver -and $CurrentDriver.DriverVersion) {
+                [System.Version]$ver = $CurrentDriver.DriverVersion
+                $CurrentVersion = ("{0}{1}" -f $ver.Build, $ver.Revision)
+
+                # Ensure the combined string is long enough
+                if ($CurrentVersion.Length -ge 1) {
+                    $CurrentVersion = $CurrentVersion.Substring(1).Insert(3,'.')
+                } else {
+                    Write-Log "Driver version format is invalid. Unable to parse version."
+                    $CurrentVersion = "Unknown"
+                }
+            } else {
+                Write-Log "CurrentDriver or DriverVersion is undefined. Skipping version processing."
+                $CurrentVersion = "Unknown"
+            }
 		}
 
 		Write-Log "Current Driver Version: $CurrentVersion"
 
         # Strip "NVIDIA" from the GPU name before checking against NVIDIA DB
-        $GPUNameNormalized = $NvidiaGpuInfo.Name -replace "^NVIDIA\s+", ""
+        $GPUName = "$($NvidiaGpuInfo.Name)"
+        $GPUNameNormalized = $GPUName -replace "^NVIDIA\s+", ""
+        #Write-Log "Normalized GPU Name: $GPUNameNormalized"
 
         # If PSID and PFID are missing, fetch them dynamically
         if (-not $NvidiaGpuInfo.ParentID -or -not $NvidiaGpuInfo.Value) {
@@ -131,8 +151,8 @@ function UpdateNVIDIADriver {
             $NvidiaGpuInfo.Value = $SelectedGpuInfo.Value
         }
 
-        if (-not $SelectedGpuInfo) {
-            Write-Log "Failed to find a matching GPU entry in NVIDIA's database for '$GPUName'. Exiting."
+        if (-not $NvidiaGpuInfo) {
+            Write-Log "Failed to find a matching GPU entry in NVIDIA's database for '$GPUName' or '$GPUNameNormalized'. Exiting."
             return
         }
 
