@@ -11,10 +11,10 @@ if (!(Test-Path $MainScriptRoot)) {
     New-Item -ItemType Directory -Path $MainScriptRoot | Out-Null
 }
 
-$MainScriptPath = Join-Path $MainScriptRoot '\driver_installer.ps1'
+$MainScriptPath = Join-Path $MainScriptRoot 'driver_installer.ps1'
 
 # Download the main script
-Write-Output "Downloading NVIDIA install script from $MainScriptUrl..."
+Write-Output "Downloading NVIDIA install script from $MainScriptUrl to $MainScriptRoot"
 Invoke-WebRequest -Uri $MainScriptUrl -OutFile $MainScriptPath -UseBasicParsing
 
 # Run the downloaded script as admin
@@ -23,3 +23,5 @@ if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]:
     Start-Process PowerShell -Verb RunAs "-NoProfile -ExecutionPolicy Bypass -Command `"cd '$pwd'; & '$MainScriptPath';`"";
     exit;
 }
+
+PowerShell -ExecutionPolicy Bypass -File $MainScriptPath
